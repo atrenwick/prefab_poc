@@ -1,0 +1,1 @@
+This folder contains scripts, in Python and R, used to process source HTML/XML files containing metadata for files and speakers (in the case of oral corpora) and bibliographic information in the case of corpora of novels.

@@ -1,0 +1,3 @@
+py scripts of utilities used in Prefab pipeline
+Note that 'orgeo_hashtag_repl_dict' is not a script, it is a json file containing a dictionary of string:replacement values. These find strings and insert replacement in their place. This allows for the removal of # from specific multiword tokens.
+Scripts in the /optional/ subfolder are optional, whereas scripts in /utilities are either 'always_run' or 'run_to_deal_with_specific_cases/errrors'
