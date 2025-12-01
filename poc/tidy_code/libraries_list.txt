@@ -1,0 +1,39 @@
+from bs4 import BeautifulSoup
+from conllu import parse, parse_tree
+from itertools import islice
+from lxml import etree
+from math import ceil
+from spacy.lang.fr import French
+from spacy.lang.fr import French
+from spacy.matcher import PhraseMatcher
+from spacy.pipeline import Sentencizer
+from spacy.tokenizer import Tokenizer
+from spacy.util import filter_spans
+from stanza.utils.conll import CoNLL
+from string import ascii_lowercase
+from tqdm import tqdm
+
+import conllu
+import glob
+import io
+import json
+import os
+import pathlib
+import platform
+import pickle
+import re
+import send2trash
+import spacy
+import string
+import time
+import unidecode
+import zipfile
+
+import numpy as np
+import pandas as pd
+
+
+
+
+
+
