@@ -1,10 +1,16 @@
 ##lemmatiserV3
 # note that v6 is in early beta ; A suffix here is non-meaningful
 # imports
+import json
+import time
+import platform
+import glob
+import os
+import re
+import string
 import pandas as pd
 import numpy as np
 from stanza.utils.conll import CoNLL
-import json, time, platform, glob, os, re, string
 from tqdm import tqdm
 
 if platform.system() == "Darwin":
@@ -12,14 +18,13 @@ if platform.system() == "Darwin":
 elif platform.system() == "Windows":
   PathHead = "C:/Users/Data/ANR_PREFAB/"
 elif platform.system() == "Linux":
-  PathHead = "C:/Users/nom_utilisateur/"
+  PathHead = "/home/nom_utilisateur/"
 
 # loaders
 ## loaders :: a 'preloader' for individual files for each analyser, which is called by the loader for each analyser, running over the model codes
 def hops_preload(i, hops_file, hops_model):
     ''' 
-    take int, hops_file and hops_model and remove redundant columns, empty columns and add model_code to colnames
-    int is used to determine whether TokenID and Forme cols are to be retained (yes if int ==0, else no, to avoid redundant repetitions)
+    Load individual HOPS output files to prepare for lemmatisation 
     Args:
         i: integer from enumeration over list of hops_models.
         hops_file: file of annotations from hops
@@ -27,19 +32,21 @@ def hops_preload(i, hops_file, hops_model):
         hops_model : code of hopsmodel
     Returns:
         hops_preloaded : pd df of hops annotations without redundant/empty cols
+    Notes : redundant and empty columns are removed, model_code is added to column names
+        int is used to determine whether TokenID and Forme cols are to be retained (yes if int ==0, else no, to avoid redundant repetitions)
+
     '''
-    hops_names_temp = ["TokenID", "Forme", "UUID", "POS"]#, "blank1", "blank2", "Head", "DEPrel", "blank3", "blank4"]
-    hops_preloaded = pd.read_csv(hops_file, sep="\t", header=None, quoting = 3, usecols = [0,1,2,3])
+    hops_names_temp = ["TokenID", "Forme", "UUID", "POS", "blank1", "blank2", "Head", "DEPrel", "blank3", "blank4"]
+    hops_preloaded = pd.read_csv(hops_file, sep="\t", header=None, quoting = 3, low_memory=False)
     hops_preloaded.columns = hops_names_temp
     hops_model = str(hops_model)
     if i ==0:
-        #hops_preloaded = hops_preloaded.drop(["blank1", "blank2", "blank3", "blank4", "Head", "DEPrel"], axis=1)
+        hops_preloaded = hops_preloaded.drop(["blank1", "blank2", "blank3", "blank4", "Head", "DEPrel"], axis=1)
         names_real = [name + hops_model for name in hops_preloaded.columns]
         names_real[0], names_real[1], names_real[2] = "TokenID","Forme","UUID"
         hops_preloaded.columns = names_real
     else:
-        # hops_preloaded = hops_preloaded.drop(["TokenID", "Forme", "blank1", "blank2", "blank3", "blank4","Head", "DEPrel"], axis=1)
-        hops_preloaded = hops_preloaded.drop(["TokenID", "Forme"], axis=1)
+        hops_preloaded = hops_preloaded.drop(["TokenID", "Forme", "blank1", "blank2", "blank3", "blank4","Head", "DEPrel"], axis=1)
         names_real = [name + hops_model for name in hops_preloaded.columns]
         names_real[0] = "UUID"
         hops_preloaded.columns = names_real
@@ -47,8 +54,8 @@ def hops_preload(i, hops_file, hops_model):
     return hops_preloaded
 def load_all_HOPS(path, corpus, ref_file):
     '''
-    take path, corpus, and ref file and enumerate over list of codes of HOPSmodels.
-    the input corpus, and whether it is ROM or not is a remnant of older version, used to discriminate the structure of filenames ; it is always set as ROM by the lemmatizer
+    take path, corpus, and ref file and enumerate over list of codes of HOPSmodels. 
+    Notes: `ROM` value is a remnant of an older version, used to discriminate the structure of filenames ; it is always set as ROM by the lemmatizer loop over files and use the preloader to load each file, then merge on UUID to yield a df of all HOPS parses
     loop over files and use the preloader to load each file, then merge on UUID to yield a df of all HOPS parses
     '''
     hops_models = [5262, 5272, 5282, 5287, 5292, 5297]
@@ -82,9 +89,9 @@ def load_udpipe(i, udpipe_file, udpipe_model):
     all_rows = []
     # iterate over tokens, with iter_tokens, getting conll text and adding sentID from token.sent.comments item 0
     for token in current_udpipe_data.iter_tokens():
-      sent_id_current = token.sent.comments[0]
-      string = token.to_conll_text() + "\t" + str(sent_id_current) 
-      all_rows.append(string)
+        sent_id_current = token.sent.comments[0]
+        string = token.to_conll_text() + "\t" + str(sent_id_current) 
+        all_rows.append(string)
 
     # send to df with 1 column named temp, then split on tab in this named column, expanding to add new cols 
     udpipe_df = pd.DataFrame(data = all_rows, columns = ['temp'])
@@ -92,8 +99,8 @@ def load_udpipe(i, udpipe_file, udpipe_model):
     # assign temporary names
     udpipe_df.columns = conll_names_temp
     udpipe_model = str(udpipe_model)
-    
-    # remove named columns depending on whether df is first (and thus corresponds to 301/311) in series to be added
+
+    # remove named columns depending on whether df is first in series to be added
     if i ==0:
         udpipe_df = udpipe_df.drop(["blank1",  "blank3", "LEM", "Head", "DEPrel"], axis=1)
         names_real = [name + udpipe_model for name in udpipe_df.columns]
@@ -139,9 +146,9 @@ def load_stanza(i, stanza_file, stanza_model):
     current_stanza_data = CoNLL.conll2doc(stanza_file)
     all_rows = []
     for token in current_stanza_data.iter_tokens():
-      sent_id_current = token.sent.comments[0]
-      string = token.to_conll_text() + "\t" + str(sent_id_current) 
-      all_rows.append(string)
+        sent_id_current = token.sent.comments[0]
+        string = token.to_conll_text() + "\t" + str(sent_id_current) 
+        all_rows.append(string)
 
     stanza_df = pd.DataFrame(data = all_rows, columns = ['temp'])
     stanza_df = stanza_df['temp'].str.split('\t', expand=True)
@@ -275,7 +282,7 @@ def compare_and_tidy(udpipe_all, stanza_all, hops_all):
     result = pd.DataFrame([1 if (stanza_all.iloc[i,5] == stanza_all.iloc[i,9] == stanza_all.iloc[i,13] == stanza_all.iloc[i,17]) else 0 for i in range(len(stanza_all))]).value_counts()
     if result.iloc[0] == len(stanza_all):
         stanza_all.drop(['sent_id121', 'sent_id122', 'sent_id123'], axis=1, inplace=True)
- #       print("Success : Stanza's sent_id values all match")
+    #print("Success : Stanza's sent_id values all match")
 
     # 2.9 : get columns in specified order, rename, then send to all_data
     # restrict columns to specified values then concatenate
@@ -304,7 +311,7 @@ def make_POS_recommendations(df):
     corrige = ""
     these_cols = df.columns[4:-1]
     # check if word head in colname and coerce to int to force col as int not str??
-    print("Making  recommendations…")
+    print("Making recommendations…")
     for index, row in df.iterrows():
         slice = row[these_cols].value_counts()
         formatted_strings = []
@@ -340,10 +347,10 @@ def get_feats(array, target):
     '''
     helper function to get values of feats, but returning _ if value is None or NaN or nan
     Args :
-      array : np array of feats
-      taget : index value in the array to get
+        array : np array of feats
+        target : index value in the array to get
     Returns : 
-      feats : value of feats, either as the string from the df or an underscore if None or nan
+        feats : value of feats, either as the string from the df or an underscore if None or nan
     '''
     feats = array[target][0]
     if str(feats) =="nan":
@@ -362,7 +369,7 @@ def restrict_and_reccPOS(all_data):
     target_col = all_data.columns.get_loc('sentID')
     all_data['sentID'] = pd.DataFrame([all_data.iloc[a, target_col].replace('#sent_id = ', '') for a in range(len(all_data))])
 
-    # ad dcol to determine row shading
+    # option:: add col to determine row shading
     #all_data['sentGroup'] = pd.DataFrame(['A' if int(all_data.iloc[a, target_col]) % 2 == 0 else 'B' for a in range(len(all_data))])
     # make lists of col names with list comprehensions
     POS_cols = ['UUID', 'sentID', 'TokenID', 'Forme'] + [col for col in all_data.columns if 'POS' in col] + [ 'isPLX123']
@@ -374,11 +381,16 @@ def restrict_and_reccPOS(all_data):
     return pos_update
 def apply_corrections(pos_update):
     '''
-    Function to apply specific corrections to the POS recommendations based on custom rules
-    Args:
-      input : pos_update : pd df of updated POS+recommendations. From POS_update, arrays are extracted and operated on
-      Returns :pos_reccs, formes, PLXtag : arrays of pos_reccs, formes and PLX tags after corrections made
-    dans le fonction : 
+    Apply specific corrections to POS_recommendations based on formes and analysis of specific taggers
+
+    Inputs : pos_update : pd df all_data with updated POStags
+    Returns : 
+        pos_reccs: np array of POS_recommendations
+        formes : np array of tokens analysed
+        PLXtag : np array of values for type and provenance of PLX substype
+
+    Notes :
+        dans la fonction : 
         x compte combien de corrections on apporte
         forme from formes = pos_update col formes values as array
         u = UPOS tag
@@ -398,35 +410,44 @@ def apply_corrections(pos_update):
     # 3.3 : prefer POS302 analysis when form = quoi, bon, as is better at distinguishing PRON/INTJ, ADJ/INTJ
     # prefer analysis from 302 for quoi, bon
 
+    ## initialise a list and a counter
     update = []
     x =0
+    ## zip together and iterate over these 4 items : forme, UPOStag, recc_pos and tag
     for forme, u, r ,tag in zip(formes,  POS312, reccs, PLXtag):
         if forme in ['quoi', 'bon'] : # if forme is in list, set r to udpipe value
             #print(u, r) 
-          update.append(u)
-          # use oral flag to add PLXtag value to existing data rather then overwrite
-          if oral_flag == "T":
-            current_misc_value = PLXtag[x]
-            new_misc_value = '<plx="PLM">' + current_misc_value
-            PLXtag[x] = new_misc_value
-          else :
-            PLXtag[x] = "PLM"
+            update.append(u)
+            # use oral flag to add PLXtag value to concatenate value and existing data rather then overwrite
+            if oral_flag == "T":
+                current_misc_value = PLXtag[x]
+                new_misc_value = '<plx="PLM">' + current_misc_value
+                PLXtag[x] = new_misc_value
+            else :
+                PLXtag[x] = "PLM"
         else:
             update.append(r)
         #print(update)
         x +=1
-    # send to array as reccs
+    # send the list update to an array as pos_reccs, replacing the initial array
     pos_reccs = np.array(update)
     
     return pos_reccs, formes, PLXtag
 
 def run_post_lemm_corrections(formes, lemmas_all, pos_update, reccs):
     '''
-    Run POS_LEM corrections that are based on POS tags and lemma found : this for the specific case of differentiating allerAUX from aller VERBLEXICAL
+    Run lemmatisation corrections that require a POS prediction
+    
     Args : 
-      Inputs : formes, lemmas_all, pos_update, reccs : np arrays of formes, lemmas_all, pos_update and reccs
-      Returns : reccs : np array of updated recommendations 
-    j is strictly necessary
+    Input : formes : array of forms to analyse
+        lemmas_all : array of all lemmas
+        pos_update : array of POS predictions from parsers
+        reccs : array of pos_recommendations
+    Returns : reccs : array of POS recommendations
+    
+    Notes :
+    the variable j is strictly necessary, being used to ensure progress over the entire length of the arrays
+    Even though lemmatisation proper will be carried out later, this specific step uses the fact that aller is the lemma for both the lexical verb and the auxiliary verb, and thus can be used without issue to discriminate between the two POS values
     '''
     #4.4.1 remap lemma "aller" to analysis 5262
     # parser 5262 was noted to be better than recommendation at distinguishing AUX and VERB uses of aller : we'll thus use this lemma to update the POS. 
@@ -459,9 +480,14 @@ def update_features(pos_reccs, lemmas_all, all_data, feats_all, PLXtag):
   '''
   Get GSD features as array and add these to feats_all if feats is blank and POS is the same as the GSD_pos
   Args : 
-      Inputs : pos_reccs, lemmas_all, all_data, feats_all, PLXtag : np arrays of values
-      Returns : feats_all : updated np array of feats
-  '''
+    Input : pos_reccs : np array of pos recommendations
+      lemmas_all : np array of lemmas
+      all_data : pd df of predictions from parsers
+      feats_all : np array of recommended feats
+      PLXtag : np array of PLXtag values
+    Returns :
+        feats_all : updated np array of morphological features
+ '''
   # get gsd feats as array
   feats_all =  list(feats_all)
   feat_gsd = list(all_data['FEAT120'])
@@ -474,12 +500,16 @@ def update_features(pos_reccs, lemmas_all, all_data, feats_all, PLXtag):
   return feats_all
 
 def rebuild_for_conllu(ref_file_full):
-    '''
-    initial steps to convert the np arrays back to a conllu output
-    Note : numbers is remnant from earlier version; but helps maintain clarity more than anything else
-    Args :  input : ref_file_full : absolute path to reference file being operated on, so output name can be created
-            Returns : sent_id, tokenids, metastrings : np array, nparray and list of ids, ids and metastrings
-    '''
+    """
+    Get sent_id, token_ids and metadata from source files to enable reconstruction of conllu file for export
+    Args :
+        Input : ref_file_full : absolute path to reference file
+    Returns :
+        send_id : np array of sentIDs, of the same shape as the recommendations
+        token_ids : np array of tokenIDs, of the same shape as the recommendations
+        meta_strings : array of lists of metastrings, of the same shape as the recommendations
+    """
+    # 5 rebuild conllu
     # 5.1 designate input file for stanza to get metas…
     ref_data = CoNLL.conll2doc(ref_file_full)
     # 5.2 get metadata from strings and make arrays…
@@ -503,9 +533,9 @@ def export_reinjected_annotations(output_file, arrays, meta_strings):
     Note : current version has all cols in correct order, previous version has Feats and XPOS inverted
     Note2 : order of arrays doesn't seem to have any special significance : correct order made with string concatenation
     Args : input : 
-              output_file
+              output_file : absolute path to file to be written on export with all recommendations and annotations
               arrays : list of arrays of annotations in order formes, feats, reccs, lemmas, PLXtag, sent_id, tokenIDs
-              meta_strings : list of sent_ids
+              meta_strings : array of lists of strings of metadata at sentence level
            returns: no return object : strings written to file and message confirming succcess printed on success    
     '''
     formes = arrays[0]
@@ -516,6 +546,7 @@ def export_reinjected_annotations(output_file, arrays, meta_strings):
     sent_id = arrays[5]
     tokenids = arrays[6]
     
+    # iterating over the arrays of information at token-level, make strings and precede these with metastrings when tokenID is 1, writing conllu formatted strings to outputfile  
     m=0
     with open(output_file, 'w', encoding="UTF-8") as f:
         for t, tokenid in enumerate(tokenids):
@@ -531,9 +562,18 @@ def export_reinjected_annotations(output_file, arrays, meta_strings):
                 f.write(string)
     print(f"File {output_file} exported successfully")
   
-######  
+############################################################################################################################################### 
+###############################################################################################################################################
+####################      END OF FUNCTIONS DEALING WITH POS, LEM, FEAT RECOMMENDATIONS                      ###############################
+###############################################################################################################################################
+###############################################################################################################################################
  
-# lemmatisation preparation functions
+
+############################################################################################################################################### 
+###############################################################################################################################################
+####################                              LEMMATISATION FUNCTIONS START HERE                            ###########################
+###############################################################################################################################################
+###############################################################################################################################################
 
 def run_dataset_preppers(lefff_data):
   '''
@@ -553,27 +593,13 @@ def run_dataset_preppers(lefff_data):
   datasets = [VERB_dataset, NOUN_dataset, AUX_dataset, ADJ_dataset, ADV_dataset, functword_dataset]
   return datasets
 
-# lefff_data['POS'].value_counts()
-# VERB     836568
-# ADJ      178453
-# NOUN     148827
-# PROPN     60971
-# AUX       28390
-# ADV        4393
-# ADP         443
-# SCONJ       332
-# DET         171
-# PRON         93
-# CCONJ        47
-# NUM          43
-# INTJ         21
 
 
 ## series of extremely explicit functions to make sets of arrays for specific POS categories to enable faster lookups at price of longer preparation time
 ## specific functions for VERB, NOUN, ADV, AUX, ADJ
 ## remaining POS categories are in a grouped 'functword' : INTJ, NUM, CCONJ, SCONJ, PRON, DET
-#  @AR : what happened to PROPN ? => went to PLX as both PLX and simplex, so should already have been processed
-## TO DO : make these declarations more efficient
+## TO DO : these 5 function definitions are the extremely un-pythonic in their repetition. make them more pythonic, but don't make their functioning more opaque.
+## such as cats = V, N, D, X, J, names = {values} and for each cat, name, make dataset
 
 def prepare_VERB_leff_data(lefff_data):
   # convert pd df to arrays for verb specific data
@@ -590,8 +616,11 @@ def prepare_VERB_leff_data(lefff_data):
   return lefff_data, VERB_dataset
 
 def prepare_NOUN_leff_data(lefff_data):
-    # convert pd df to arrays for Noun specific data
-
+  """
+  Prepare NOUN_dataset by removing Noun data from lefff_data and converting to np arrays
+  Args : Input : lefff_data : pd df pf forme, POS, LEM
+  Returns: NOUN_dataset : list of arrays of LEMMA, FORME, POS, FEATS
+  """
   NOUN_data = lefff_data.loc[lefff_data['POS']=="NOUN"]
   lefff_data = lefff_data.loc[lefff_data['POS']!="NOUN"]
 
@@ -604,8 +633,11 @@ def prepare_NOUN_leff_data(lefff_data):
   
   return lefff_data, NOUN_dataset
 def prepare_ADV_leff_data(lefff_data):
-  # convert pd df to arrays for ADV specific data
-
+  """
+  Prepare ADV_dataset by removing ADV data from lefff_data and converting to np arrays
+  Args : Input : lefff_data : pd df pf forme, POS, LEM
+  Returns: ADV_dataset : list of arrays of LEMMA, FORME, POS, FEATS
+  """
   ADV_data = lefff_data.loc[lefff_data['POS']=="ADV"]
   lefff_data = lefff_data.loc[lefff_data['POS']!="ADV"]
 
@@ -618,8 +650,11 @@ def prepare_ADV_leff_data(lefff_data):
   
   return lefff_data, ADV_dataset
 def prepare_AUX_leff_data(lefff_data):
-    # convert pd df to arrays for AUX specific data
-
+  """
+  Prepare AUX_dataset by removing AUX data from lefff_data and converting to np arrays
+    Args :  Input : lefff_data : pd df pf forme, POS, LEM
+            Returns: AUX_dataset : list of arrays of LEMMA, FORME, POS, FEATS
+  """
   AUX_data = lefff_data.loc[lefff_data['POS']=="AUX"]
   lefff_data = lefff_data.loc[lefff_data['POS']!="AUX"]
 
@@ -632,8 +667,11 @@ def prepare_AUX_leff_data(lefff_data):
   
   return lefff_data, AUX_dataset
 def prepare_ADJ_leff_data(lefff_data):
-  # convert pd df to arrays for ADJ specific data
-
+  """
+  Prepare ADJ_dataset by removing ADJ data from lefff_data and converting to np arrays
+  Args :    Input : lefff_data : pd df pf forme, POS, LEM
+            Returns: ADJ_dataset : list of arrays of LEMMA, FORME, POS, FEATS
+  """
   ADJ_data = lefff_data.loc[lefff_data['POS']=="ADJ"]
   lefff_data = lefff_data.loc[lefff_data['POS']!="ADJ"]
 
@@ -646,10 +684,12 @@ def prepare_ADJ_leff_data(lefff_data):
   
   return lefff_data, ADJ_dataset
 def prepare_functword_data(lefff_data):
-  '''
-  Prepare arrays for the remaining POS tags : INTJ, NUM, CCONJ, SCONJ, PRON, 
-  '''
-    # convert pd df to arrays for function_word specific data
+  """
+  Prepare functword_dataset by converting remaining POS categories to to np arrays
+  Args :    Input : lefff_data : pd df pf forme, POS, LEM
+            Returns: functword_dataset : list of arrays of LEMMA, FORME, POS, FEATS for all remaining POS values
+  """
+  # convert pd df to arrays for function_word specific data
 
   functword_lemmas_array = lefff_data['Lemme'].values
   functword_formes_array = lefff_data["Forme"].values
@@ -684,9 +724,8 @@ def prepare_fastlists():
     '''
     Load the list of the most common formes, POS and lemmas to be used as a priority checklist : 50-60 % of tokens are in this list of around 1200 forms, enabling fast lookups in the np array created
     Args : 
-      input : takes no input argument ; loads from specific csv file with named columns
-      Returns : four arrays, one for each of lemmas, formes, POS and feats. Drawn from the same df, the arrays are the same shape and item i is the same row from the df-source
-    Notes : the original csv is not returned      
+            Input : takes no input file, as loads a specific, hard-coded csv file to discourage modification of the large-coverage fastlookup.csv file
+            Returns : fastlemmas, fastforms, fastPOS, fastfeat : np arrays of lemmas, forms, POS and features for most-common tokens
 
     '''
   
@@ -703,14 +742,19 @@ def prepare_fastlists():
 
 # lemmatisation running functions :: these change to be used to build verb_data dict…etc
 def get_lemma_feats(pos, forme, datasets, k, PLXtag):
-  '''
-  function to get lemmma and feats for a forme + POStag
-  Args : inputs : pos : POStag of forme being considered
-                  forme : form of forme being considered
-                  datasets : list of datasets yielded by preppers
-                  k : index of current term in the formes array
-          returns : lemma, feats : lemma and feats of current_form
-  '''
+  """
+  Get the feats for a given pos, forme and k value
+  Args : 
+    Input : 
+      pos : POS tag of current token
+      forme : form current token
+      datasets : the list of datasets of arrays where the annotations are stored
+      PLXtag : PLX_tag of current token
+      k : integer keeping track of place in the array
+    Returns : lemma, feats
+      lemma : lemma for current token
+      feats : feats for current token
+  """
   # if POS not in list1 and forme + POS combination gives 0length target in fastlist, we use this method to get the lemma.
   functword_dataset = datasets[5]
   # based on pos of input form, get arrays to look in
@@ -722,10 +766,10 @@ def get_lemma_feats(pos, forme, datasets, k, PLXtag):
     POS_array =  functword_dataset[2] 
     feats_array =  functword_dataset[3] 
 
-  # find matches, and return these as a list from LC  
+ ## get matches where formes array and matches the form of the token, and get the 0th item of the array, which is the index
   matches = np.where(formes_array == forme.lower())[0]
   target =  [match for match in matches ]
-  ## if the forme isn't in the list, let it be its own lemma, with _ as feats
+ ## if the list of targets has no length, the forme isn't in the list, so it will be its own lemma with _ as feats
   if len(target)==0:
     lemma = forme.lower()
     feats = "_"
@@ -746,35 +790,59 @@ def get_lemma_feats(pos, forme, datasets, k, PLXtag):
   return lemma, feats
 
 def set_lemme_to_forme(pos, forme):
-  '''
-  helper function to set lemma to forme
-  '''
+  """
+  helper function to set lemma to form with no feats if called
+  Args : 
+  input : 
+    pos : POS_tag of current forme
+    forme : token of current forme
+  Returns : 
+    lemma : lemma set from forme
+    feats : _ as no more precise annotation available
+  """
+
   lemma = forme
   feats = "_"
   return lemma, feats
 
 def test_nums_for_lemmas(pos, forme):
-  '''
-  helper function to determine whether form is a number with a lemma
-  '''
+  """
+  helper function to set lemma to lowercase form is POS is NUM and is not roman numeral
+  """
   if pos == "NUM":
     lemma = process_nums_for_romains(forme)
     feats = "_"
   return lemma, feats
 
 def get_fastmatchcount(forme, pos):
-  '''
-  get the count of matches with POS and form match
-  this lets us know whether to use fast_arrays or full_arrays
-  args:
-    inputs : forme, pos : forme and pos being considered
-    returns : target : matches in fast arrays of there are any
-  '''
+  """
+  get the list of matches if the current token is in fast forms and the POS value in fastforms matches that of the current token
+  Args : 
+    input : 
+        forme : string of current token
+        pos : POStag of current token
+    Returns : 
+        target : a list of values where both POS and form values of current token match for values in fastforms. List can be of length 0 or greater. 
+  """
   matches = np.where(fastformes == forme.lower())[0]
   target = [match for match in matches if fastPOS[match]==pos]
   return target
 
 def get_fastdata(fastlemmas, fastfeat, PLXtag, target, k):
+    """
+    get annotations from fastlookups
+    Args : 
+        Input : 
+            fastlemmas : array of lemmas for fastlookup
+            fastfeat : array of features for fastlookup
+            PLXtag : array of PLXtag values for fastlookup
+            target : list of indices with form matches
+            k : integer to allow specific addressing in arrays
+        Returns : 
+            lemma : lemma of token identified
+            feats : features for token identified
+            PLXtag : PLXtag value for token identified
+    """
     lemma = fastlemmas[target][0]
     
     ## get feats with function, replacing blanks with customtext
@@ -789,6 +857,17 @@ def get_fastdata(fastlemmas, fastfeat, PLXtag, target, k):
         
     return lemma, feats, PLXtag
 def set_list1_lemmas(forme, pos):
+  """
+  set lemma to lowercase for tokens in list1, and run special function if POStag is NUM
+  Args : 
+    input
+      forme : form of the current token
+      pos : pos of the current token
+    returns : 
+      lemma : lemma of token identified
+      feats : features for token identified
+
+  """
   if pos == "NUM":
       lemma, feats = test_nums_for_lemmas(pos, forme)
   else:
@@ -796,6 +875,22 @@ def set_list1_lemmas(forme, pos):
   return lemma, feats
 
 def get_non_fast(pos, forme, datasets, list2, k, PLXtag):
+    """
+    get annotations that are not in the fastlookups
+    Args input :
+        pos : POStag of current token
+        forme : form of current token
+        datasets : list of datasets created
+        list2 : list of specific POS tags where lookups are necessary (cf NUM, SYM, PUNCT, where no lookup necessary)
+        k : integer to allow specific addressing in arrays
+        PLXtag : PLXtag value of current token
+    Returns :
+        lemma : lemma returned from lookup lists for current token
+        feats : features for token identified
+  
+    Notes : returns _unknownpostag_ in FEAT column in the case of an unrecognised POStag, preserving the POStag. this va  lue causes conllu parser to crash in Stanza, preventing further processing until this error is remedied.
+        In current state, if homonyms or homographs exist, the first hit is retrieved. This is sub-optimal, but can be fi  ne-tuned later, notably sending FAUT to FALLOIR not FAILLIR
+    """
     if pos in list2:
       lemma, feats = get_lemma_feats(pos, forme, datasets, k, PLXtag)
     else:
@@ -803,6 +898,17 @@ def get_non_fast(pos, forme, datasets, list2, k, PLXtag):
     return lemma, feats
 
 def unk_postag(pos, forme):
+  """
+  Helper function to take a POStag that is neither in list1 nor list2 and set a custom value for FEATS.
+  Args : 
+    Input :
+        pos : POStag that is neither in list1 nor in list2 (ie, either not a standard UPOS tag or X)
+        forme : form of current token
+    Returns
+        lemma : lemma returned from lookup lists for current token
+        feats : features for token identified
+ 
+  """
   lemma = forme.lower()
   feats = '_unknownpostag_'  
   return lemma, feats
@@ -812,12 +918,12 @@ def unk_postag(pos, forme):
 
 # remove leading -
 def make_tidy_lemma(lemma):
-    '''
-    tidy lemmas by removing leading punctuation and replacing ligatures with exploded forms
-    args :
-      input : lemma : current_value of lemma
-      returns : tidy_lemma : lemma in tidy form
-    '''
+    """
+    Tidy lemmas by removing leading PUNCT and expanding standard French ligatures
+    Args :
+        Input : lemma : input form of lemma as returned from lookup or from lowercase of token
+        Returns : tidy_lemma : tidy version of lemma
+    """
     # convert lemmas to str, then remove any leading chars from lemmas
     input_string = str(lemma)
     input_string = re.sub("œ", "oe", input_string)
@@ -837,16 +943,22 @@ def make_tidy_lemma(lemma):
     # Remove the leading invalid character if present
     if input_string and input_string[0] in invalid_chars:
         return input_string[1:]
-    return tidy_lemma ## tidy lemma isn't defined herein ; what about in C runner ? relationship between input_string and tidy_lemma, and whichb to return when needs to be clarified
-
-
-# 
-# def get_V_hypoarrays()
-# 
+    #return tidy_lemma ## tidy lemma isn't defined herein ; what about in C runner ? relationship between input_string and tidy_lemma, and whichb to return when needs to be clarified
 
 
 def return_subarrays(forme, pos, NOUN_data, VERB_data, AUX_data, ADJ_data, ADV_data):
   # get and return the letter and POS-specific subarray
+ ## TO DO : this function involves repeating code which can be made more pythonic
+  """
+  Get the letter-level arrays for the listed datasets to enable faster lemmatisation
+  Args :
+    Input :
+        forme : form of the current token. the uppercase first character of this form is used to retrieve the array of forms for the specific POS that begin with this letter
+        pos : POStag of the current token
+        NOUN_data, VERB_data, AUX_data, ADJ_data, ADV_data : datasets created for each of the POS values
+    Returns :
+        formes_array, lemmas_array, POS_array, feats_array : arrays containing formes, lemmas, POS and FEATS for the combination of initial letter and POS value
+  """
   thisChar = forme[0].upper()
   if pos == "VERB":
     array_set = VERB_data[thisChar]
@@ -866,8 +978,18 @@ def return_subarrays(forme, pos, NOUN_data, VERB_data, AUX_data, ADJ_data, ADV_d
 
   return formes_array, lemmas_array, POS_array, feats_array
 
-# this function gets called
 def generate_subarrays(letter, dataset):
+    """
+    Make the subarrays at initial-letter level within each POS category
+    Input : 
+      letter : alphabetic letter for which to create subarrays
+      dataset : a dataset of arrays for a specific POS category
+    Returns:
+      formes_subset : array of forms
+      lemmas_subset : array of lemmas
+      feats_subset : array of features
+      POS_subset : array of POS values
+    """
     # generate subarrays : this will be called by make_subarray_sets
     formes_array= dataset[1]
     lemmas_array =  dataset[0]
@@ -880,30 +1002,17 @@ def generate_subarrays(letter, dataset):
     POS_subset = POS_array[index_value_set]
     return formes_subset, lemmas_subset, feats_subset, POS_subset
 
-# this function does not get called
-def generate_verb_hypoarrays(twogram, dataset):
-    # generate subarrays : this will be called by make_subarray_sets
-    formes_array= dataset[1]
-    lemmas_array =  dataset[0]
-    POS_array =  dataset[2]
-    feats_array =  dataset[3]
-    index_value_set = [i for i in range(formes_array.size) if str(formes_array[i])[0:2] == twogram.lower()]  
-    formes_subset = formes_array[index_value_set]
-    lemmas_subset = lemmas_array[index_value_set]
-    feats_subset = feats_array[index_value_set]
-    POS_subset = POS_array[index_value_set]
-    return formes_subset, lemmas_subset, feats_subset, POS_subset
 
-# this function gets used, called
+
 def make_subarray_sets_forPOS(formes, datasets):
-    # run the generator to make the subarray sets
-    #letterset = sorted(set([str(forme[0]).upper() for forme in formes]))
-    # get sorted set of all chars which begin a form, so subarrays can be made
-    #verb_letterset = set([(str(forme)[0:2]).upper()for forme in formes])
-    ## VERB_dataset[0].size == 301710
-    ## ADJ_dataset[0].size == 56997
-    ## NOUN_dataset[0].size == 87233
-    ## AUX_dataset[0].size == 87233
+    """
+    Run the functions that will generate the datasets and subarrays for POS categories VERB, ADJ, NOUN, AUX and ADV
+    Args :
+    Input :
+        formes : list of all formes to be lemmatised. Is only used to generate the set of initial letters for which subarrays need to be created
+        datasets : list of all datasets
+    Returns : NOUN_data, VERB_data, AUX_data, ADJ_data, ADV_data : dictionaries of lists of arrays of annotations
+    """
     
     letterset = sorted(set([(str(forme)[0]).upper() for forme in formes]))
     
@@ -949,15 +1058,23 @@ def make_subarray_sets_forPOS(formes, datasets):
 
 def lookup_np_v3(formes, pos_reccs, PLXtag, datasets, oral_flag):
   '''
-  take each input array, and assign lemmas based on POS and form
+  Function to return lemmas and features for an array of formes.
   Args :
+    Input :
     formes : array of all forms in text to be lemmatised
     pos_reccs : POS recommendations for each form
     PLXtag : array of all PLXtag data. for oral corpora, this also holds the string of extra columns for time1, time2, speakername, etc, which will appear in conll column 10
     datasets : list of arrays created specifically for each text, subdivided by POS
-    oral_flag : T or F, used to control concatenation of strings for conllu col10
+        oral_flag : T or F controlling the method by which annotations are added to the PLXtag column/conllu column 10.
+    Return :
+        feats_all : np array of features for all tokens
+        lemmas_all : np array of lemmas for all tokens
+        PLXtag : PLXtag and conllu column 10 annotations for all tokens
+        times_all : array of times taken for each individual lookup
+  Notes : the timing elements (delta, times_all) add minimal overhead and are returned, but not exported automatically
+
   '''
-  # the big kahuna : get the lemmas
+ # define lists 1 and 2 ; list1 contains elements which are their own lemmas, list2 contains remaining valid POS categories
   list1 = ("SYM","PUNCT","PROPN", "NUM")
   list2 = ("ADJ", "ADV", "ADP","AUX","VERB","NOUN","DET","SCONJ","CCONJ","INTJ","PRON")
   k=0
@@ -990,10 +1107,22 @@ def lookup_np_v3(formes, pos_reccs, PLXtag, datasets, oral_flag):
   lemmas_all = np.array(lemmas_all)
   return feats_all, lemmas_all, PLXtag, times_all
 
+############################################################################################################################################### 
+###############################################################################################################################################
+####################                              LEMMATISATION FUNCTIONS END HERE                            ###########################
+###############################################################################################################################################
+###############################################################################################################################################
+
+############################################################################################################################################### 
+###############################################################################################################################################
+####################                              DEFINITION OF FUNCTIONS ENDS HERE                            ###########################
+###############################################################################################################################################
+###############################################################################################################################################
 
 
-#### end of defintiion of functions
-
+###############################################################################################################################################
+###############################################################################################################################################
+## this section is where we run stuff. some very approximate speed notes are present
 
 ######################### specify paths and things here ##############################
 # point to file, specify corpus
@@ -1008,26 +1137,21 @@ corpus = "ROM"
 fastlemmas, fastformes, fastPOS, fastfeat = prepare_fastlists()
 # prepare datasets, so they are ready to be set for each text
 datasets=  run_dataset_preppers(lefff_data)
-# MPF-Adeline1
-#current_folder = '/Volumes/Data/ANR_PREFAB/processing_romans_tranches/trancheW/004/lemmatised/'
-# path = current_folder = '/Volumes/Data/ANR_PREFAB/CorpusPREFAB/Romans/aligned_prefab_processing_archives/aligned_FR_DE_archive_zips/'
-# path = current_folder = '/Volumes/Data/ANR_PREFAB/CorpusPREFAB/Corpus_oraux/Oral_prefab_def/ESLO2/uncompressed/'
-# path = current_folder = '/Volumes/Data/ANR_PREFAB/CorpusPREFAB/Romans/aligned_prefab_processing_archives/aligned_FR_DE_archive_zips/'
-targetfolders = ['lemmatise_me']
+
+## take a list of custom values, which are folder names, and iterate over them, making lists of subfolders and processing these subfolders iteratively
+targetfolders = ['Processing']
+
 for targetfolder in targetfolders:
-  path = current_folder = f'/Volumes/Data/ANR_PREFAB/F_talkPages/connlu_wiki/v7/{targetfolder}/'
+  # set path and current_folder to same value ie the generic-level folder being processed
+  
+  path = current_folder = f'/Users/Data/ANR_PREFAB/CorpusPREFAB/WikiDiscussions/WikiDiscussions_V3d1/{targetfolder}/'
+  ## get the list of subfolders within this generic folder, and get the names of these folders as chunks and all_items
   subfolders = glob.glob(current_folder + "*/" )
   chunks = [item.replace(current_folder,'').replace('/','') for item in subfolders]
-  # skippedGE24, 53, 74, 75, TS52
-  all_items = chunks #= ["TS52"]
-  #all_items = ['HS27','HS28','HS29','HS30','HS31','HS32','HS33','HS34','HS35','HS36']
+  all_items = chunks 
   errorlist, successlist = [],[]
-  # path = '/Volumes/Data/ANR_PREFAB/F_talkPages/connlu_wiki/v5/X/' 
-  #item = 'FY18'
-  # item = all_items[-1]
   oral_flag = "F"
   for item in tqdm(all_items):
-  ##if item == "FY13" :
       ref_file_full = path + f'{item}/{item}-104.conllu'
       ref_file = ref_file_full.replace(path, '').replace('-104.conllu','').replace('101/','')
       output_file = ref_file_full.replace('-104.conllu', '-6000tv8.conllu')
@@ -1036,73 +1160,39 @@ for targetfolder in targetfolders:
           ref_file_full = ref_file_full.replace('-104.conllu', '-004.conllu')
           ref_file = ref_file_full.replace(path, '').replace('-004.conllu','').replace('101/','')
           output_file = ref_file_full.replace('-004.conllu', '-6000tv8.conllu')
-  
+
+      # load the predictions from all the parsers 
       hops_all, udpipe_all, stanza_all = load_all_data(path, corpus, ref_file)
       if len(hops_all)== len(udpipe_all) == len(stanza_all):
+        # compare and tidy the predictions
         all_data = compare_and_tidy(udpipe_all, stanza_all, hops_all)
+        # remove unnecessary columns and make recommendations, then apply necessary corrections
         pos_update = restrict_and_reccPOS(all_data)                                    #  ≈ 2-3k per s ≈ 40-50s for 100k ≈ 130-150k rest+recc/min
         pos_reccs, formes, PLXtag = apply_corrections(pos_update)                                                     # ≈ 2.9-3M/s   ≈  0.03s for 100k ≈ 175-180M corrections/min
-        # generate subsets specific to current text ## or can generate generic from list of forms in each set!
+    
+        # generate subsets specific to current text 
+        ## TODO : can generate generic from list of forms in each set!
         NOUN_data, VERB_data, AUX_data, ADJ_data, ADV_data = make_subarray_sets_forPOS(formes, datasets)
-        # use the lookup functionv3 to get lemmas based on POS and formes
-        feats_all, lemmas_all, PLXtag, times_all = lookup_np_v3(formes, pos_reccs, PLXtag, datasets, oral_flag) 
+        # run the lemmatiser now all data has been prepared
+        feats_all, lemmas_all, PLXtag, times_all = lookup_np_v3(formes, pos_reccs, PLXtag, datasets, oral_flag)    # runs around 5k tokens/s
         pos_reccs = run_post_lemm_corrections(formes, lemmas_all, pos_update, pos_reccs)                              # 1,1-1.2 M per s ≈ 0.1s for 100k ≈ 67-71 M corr/min
-        
-        sent_id, tokenids, meta_strings = rebuild_for_conllu(ref_file_full)    # is this where the feats are input into wrong col ?       # 66-80k per s ≈ 1,5 s for 100k ≈ 3,9-4,8M rebuild /s
+        # preparations for rebuilding conllu export file 
+        sent_id, tokenids, meta_strings = rebuild_for_conllu(ref_file_full)                       # 66-80k per s ≈ 1,5 s for 100k ≈ 3,9-4,8M rebuild /s
+        # update features
         feats_all = update_features(pos_reccs, lemmas_all, all_data, feats_all, PLXtag)
-        
-        arrays = [formes, feats_all, pos_reccs, lemmas_all, PLXtag, sent_id, tokenids]                              #   2.3 M-B per s ≈  40m-µs for 100k ≈ 139 M-B/min
+        # send all the data for export to a list
+        arrays = [formes, feats_all, pos_reccs, lemmas_all, PLXtag, sent_id, tokenids]               #  2.3 M-B per s ≈ 40m-µs for 100k ≈ 139 M/min
+        # run the exporter and make a report
         export_reinjected_annotations(output_file, arrays, meta_strings)
         report = item, len(hops_all), len(udpipe_all), len(stanza_all)
         successlist.append(report)
       else:
+        ## print the error message if there is an error, and add the report to the log, including the lengths of the predictions as these being mis-matched is the most common source of errors
         print(f"ERROR FOR ITEM == {item}")
         report = item, len(hops_all), len(udpipe_all), len(stanza_all)
         print(f"Report :: uneven lengths : {report}")
         errorlist.append(report)
+print("Wahoo, lemmatisation complete")
 
 
 ## TODO : add intermediate level of lookup, consisting of POS, LEM, forme for all forms used in text thus far:
-#### notes
-'''
-lemmatisation notes:
-for oral, need to reroute Hum from PROPN to INTJ in 6001 step
-qu'est-ce qui missed, d'accord missed : what other PLX missed in oral ??
-
-string manupulation post-lemmatization to send, eg wrongly tokenised ::
-30	qu'est-ce qui	qu'est-ce qui	MOO	_	_	_	_	_<t1="551.44"><t2=551.72"><spk="Mickaël"><cloc="same"><pause="without"><lex="-"><sup="-"?
-
-"^(\d+)\tqu'\tque\tPRON\t_\t_\t_\t_\t_\t<t1="(.+?)"><.+?>$\n^(\d)+\test-ce\test-ce\tPRON\t_\t_\t_\t_\t_\t<.+?>$\n^(\d)+\tqui\tqui\tPRON\t_\t_\t_\t_\t_\t<.+?><t2="(.+?)">$"
->>
-
-"\1\tqu'est-ce qui\tqu'est-ce qui\tMOO\t_\t_\t_\t_\t_<t1="\2"><t2=\5"?""
-
-to 
-
-30	qu'est-ce qui	qu'est-ce qui	PRON	_	_	_	_	_	<t1="551.44"><t2="551.72"><spk="Mickaël"><cloc="same"><pause="without"><lex="-"><sup="-">
-
--- still need to reattach là, -ci to celui, 
-send -moi to 2 tokens
-'''
-#"adeptes" in ADJ_formes_array#
-
-####
-#timesarray = np.array(times_all)#
-#
-
-##
-##ADJ_dataset = datasets[3]
-## VERB_dataset[0]
-##      formes_array= dataset[1]
-##
-##ADJ_formes_array = ADJ_dataset[0]
-##new_adjs_array = new_adjs['Forme'].values
-##
-##add_me = [i for i in tqdm(range((new_adjs_array.size))) if new_adjs_array[i] not in ADJ_formes_array]
-##
-#adjs_to_add = new_adjs.loc[add_me]
-#adjs_to_add.to_csv('/Users/Adam/Library/CloudStorage/Dropbox/ANR_PREFAB/Data/lemm_lookups/add_to_lexique.csv', sep="\t", header=None)
-#
-#new_adjs = pd.read_csv("/Users/Adam/Library/CloudStorage/Dropbox/ANR_PREFAB/Data/lemm_lookups/all_morphalu_adjs.csv", sep="\t", header=None)
-#new_adjs.columns = ['Forme','LEM','POS']
-#
