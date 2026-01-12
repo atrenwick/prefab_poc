@@ -1,9 +1,13 @@
 # conll splitter
 # helper to split large conllu files into smaller files, with aa,ab,ac… suffixes added to facilitate sending to Stanza, UDPipe
+## important note :: in the `distribute_conll_strings` function, the sentence.metadata key containing the sentence ID changed from init dev with romans to final state with wikis : ensure the right key to avoid errors
+import io
+import os
+import glob
+import conllu
 
 from itertools import islice
 from stanza.utils.conll import CoNLL
-import io, os, conllu, glob
 from string import ascii_lowercase
 from math import ceil
 from tqdm import tqdm
@@ -12,15 +16,16 @@ from tqdm import tqdm
 def import_parse_prefab_connl(input_file):
  """import and parse connlu file to list of lists
  Args:
-  input_file: path to a connlu file
+  input_file: str : path to a connlu file
  Returns:
-  parsed_data : data parsed from the connlu, as list of lists
+  parsed_data : conllu.models.SentenceList object : Data parsed from the connlu as a list of sentence objects. In the list, each item is  a conllu.models.TokenList object encapsulating the token list, sentence_id and metadata. 
  """
- # read in data, parse as conllu
+ # read in raw data data
  with open(input_file, "r", encoding='UTF-8') as f:
    conllu_data = f.read()
- # tidy apostrophes, send to parsed_data
+ # tidy apostrophes, 
  conllu_data = conllu_data.replace("’","'").replace("'","'").replace("’","'")
+ #send to parsed_data
  parsed_data = conllu.parse(conllu_data)
 
  return parsed_data
@@ -58,11 +63,11 @@ def split_conllu(parsed_data, step_size):
   """Define the contents and name of each slice the conllu data will be divided into based on a given size for each chunk, defined as a number of sentences.
 
    Args:
-   parsed_data: conllu data imported and parsed, to be split into smaller chunks.
+   parsed_data: conllu SentenceList :conllu data imported and parsed, to be split into smaller chunks.
 
   Returns:
-   segments : A list of lists, where each sublist contains a chunk of the original data.
-   segment_names : a list of suffixes to add to filenames
+   segments : list : A list of SentenceList items, 
+   segment_names : list : a list of suffixes to add to filenames
   """
   # define step size of n sentences to stay under 4,4 MB limit for ROMANS ; for aliged phraseorom_fr-de, can use 3000
   step_size = int(step_size)
@@ -81,7 +86,10 @@ def split_conllu(parsed_data, step_size):
 def distribute_conll_strings(segments):
   """
   Take the lists of contents + names for slices, extract sentence-level metadata and prepare conllu data as strings for export
-  
+  Input :
+    segments : list : a list of SentenceList items
+  Returns :
+    segment_store : list : a list of conll strings
   """
   # create list to hold all outputs of all files
   segment_store = []
@@ -94,7 +102,7 @@ def distribute_conll_strings(segments):
     for i in range(len(target_list)):
      # get the current sentence and get sent level metas
      current_sentence = target_list[i]
-     id_string = str(current_sentence.metadata['sentID'])
+     id_string = str(current_sentence.metadata['sent_id'])
      meta_text_raw = '# meta_text_raw = ' + str(current_sentence.metadata['text_raw'])
      meta_text_prefab = str(current_sentence.metadata['text_prefab'])
      metas = str("\n# sent_id = ") + str(id_string) + '\n'  + str(meta_text_raw) + "\n" + str("# meta_text_prefab = ") + str(meta_text_prefab ) + "\n"
@@ -119,9 +127,9 @@ def export_to_sep_conll_files(segment_store, segment_names, input_file):
  iterate over segment store and segment names to export data to outputfile with name based on segment name and input file
  args
    : inputs
-     : segment_store : list of lists of strings, one list per file to export, each sublist containing all the strings for the document
-     : segment_names : sequential letters used to provide unique sequential names of files
-     : input_file : full path to input file
+     : segment_store : list :  a list of conll strings
+     : segment_names : list : a list of sequential letters used to provide unique sequential names of files
+     : input_file : str : full path to input file
    : returns :
      no return object :: exports a conllu file as output
  '''
@@ -146,9 +154,11 @@ def export_to_sep_conll_files(segment_store, segment_names, input_file):
 ########### Romans : n = 3000 sentences
 ########### Oral : n = 3000 sentences
 
-## current_setup: for letter in list of letters, each being its own subfolder within the v7 folder of the wiki corpus:
+#from devv7 :: the v7 folder of the wiki corpus:
+## to keep data organised, files are placed in folders by letter : A00, A01, A02 etc are all in folder A. This means we can send several letters containing small files to one processor, and a single letter with many large files to a different instance
 #for letter in tqdm(['C','D','E','F','I','J','K','L','M','N','O','P','Q']):
-for letter in tqdm(['RT']):
+# pass tqdm a list of letters
+for letter in tqdm(['RSTUVWXYZ']):
   input_files = glob.glob(f"/Users/Data/ANR_PREFAB/CorpusPREFAB/WikiDiscussions/WikiDiscussions_V3d1/Processing/{letter}/" + f"*-104.conllu")
   #input_files = glob.glob(f"/Users/Data/ANR_PREFAB/F_talkPages/connlu_wiki/v7/{letter}/" + f"*-104.conllu")
   for input_file in input_files:
